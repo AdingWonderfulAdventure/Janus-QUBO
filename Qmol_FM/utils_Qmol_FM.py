@@ -12,7 +12,7 @@ import torch.nn.functional as F
 
 # --- VAE Model Import ---
 try:
-    Block_bAE_PARENT_DIR = "/root/workspace/ProteusQUBO/Block_bAE"
+    Block_bAE_PARENT_DIR = str(Path(__file__).resolve().parent.parent / "Block_bAE")
     sys.path.insert(0, str(Path(Block_bAE_PARENT_DIR).resolve()))
     from train_gruencoder_transformerdecoder import LitBlockbAE_Transformer
 except ImportError:

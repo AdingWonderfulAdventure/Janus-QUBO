@@ -70,13 +70,13 @@ def main():
     parser.add_argument(
         "--checkpoint_path",
         type=str,
-        default="/root/workspace/ProteusQUBO/RBM/rbm_outputs/checkpoints/rbm-epoch=35-val/recon_error=0.0617.ckpt",
+        required=True,
         help="Path to the trained PyTorch Lightning checkpoint (.ckpt file)."
     )
     parser.add_argument(
         "--output_h5",
         type=str,
-        default="/root/workspace/ProteusQUBO/RBM/all.h5",
+        required=True,
         help="Path to save the generated H5 file."
     )
 
