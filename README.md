@@ -4,11 +4,11 @@ A QUBO (Quadratic Unconstrained Binary Optimization) based molecular design and 
 
 ## Overview
 
-Janus-QUBO combines deep learning and quantum-inspired optimization techniques to enable efficient molecular design in continuous latent spaces. The framework consists of three main components:
+Janus-QUBO combines deep learning and quantum-inspired optimization techniques to enable efficient molecular design in binary latent spaces. The framework consists of three main components:
 
-- **Block_bAE**: Molecular autoencoder for bidirectional SMILES ↔ binary latent vector conversion
-- **Qmol_FM**: Factorization machine-based optimizer with QUBO formulation
-- **RBM**: Restricted Boltzmann Machine for molecular sampling
+- **Block_bAE**: Binary autoencoder for bidirectional SMILES ↔ binary latent vector conversion, using SELFIES as intermediate representation
+- **Qmol_FM**: Surrogate model training (FM/MLP/FT-Transformer), QUBO formulation, molecular generation (GA/TPE) and local optimization
+- **RBM**: Restricted Boltzmann Machine for molecular distribution learning and sampling
 
 ## Key Features
 
@@ -32,61 +32,91 @@ pip install -r requirements.txt
 
 ### 1. Encode SMILES to Latent Vectors
 
-```python
-from Block_bAE.inference_latent import main as encode_smiles
+```bash
+# From a plain text file (one SMILES per line)
+python Block_bAE/encode_smiles.py \
+    --ckpt_path path/to/model.ckpt \
+    --vocab_path Block_bAE/vocab/vocabulary.json \
+    --input_smiles_file input_smiles.txt \
+    --output_h5_path latent_codes.h5
 
-# Convert SMILES strings to binary latent vectors
-encode_smiles(
-    tsv_path="input_molecules.tsv",
-    trained_model_ckpt_path="path/to/model.ckpt",
-    output_path="latent_codes.h5"
-)
+# From a TSV file (with pre-tokenized data)
+python Block_bAE/inference_latent.py \
+    --tsv_path input_molecules.tsv \
+    --trained_model_ckpt_path path/to/model.ckpt \
+    --output_path latent_codes.h5
 ```
 
-### 2. Optimize Latent Vectors
+### 2a. Generate Molecules from QUBO (de novo)
 
-```python
-from Qmol_FM.opt import optimize_solutions_batch
+```bash
+# Genetic Algorithm-based generation
+python Qmol_FM/sample_ga.py \
+    --qubo_csv Qmol_FM/example_data/qubo_128.csv \
+    --output_h5 generated_codes.h5 \
+    --n_samples 1000 --pop_size 500 --n_generations 200
 
-# Optimize molecular properties using QUBO solver
-optimize_solutions_batch(
-    qubo_csv_path="fm_qubo_matrix.csv",
-    input_h5_path="latent_codes.h5",
-    output_h5_path="optimized_codes.h5",
-    single_features_json="single_features.json",
-    pair_configs_json="pair_configs.json",
-    n_jobs=8
-)
+# TPE (Bayesian optimization) generation
+python Qmol_FM/sample_tpe.py \
+    --qubo_csv Qmol_FM/example_data/qubo_128.csv \
+    --output_h5 generated_codes.h5 \
+    --n_trials 5000 --n_samples 1000
+
+# Kaiwu quantum annealing (requires Kaiwu SDK credentials)
+# sample.py takes an Ising-format matrix; use kw.core.qubo_matrix_to_ising_matrix()
+# to convert QUBO → Ising first, then solve:
+python Qmol_FM/sample.py \
+    --ising_csv ising_matrix.csv \
+    --output_h5 solutions.h5 \
+    --user_id YOUR_USER_ID --sdk_code YOUR_SDK_CODE \
+    --num_solutions 500
+
+# Convert Ising solutions (-1/+1) back to binary latent codes (0/1)
+python Qmol_FM/convert_ising_to_qubo.py \
+    --input_csv ising_solutions.csv \
+    --output_h5 latent_codes_from_ising.h5
+```
+
+### 2b. Optimize Existing Latent Vectors (local search)
+
+```bash
+python Qmol_FM/opt.py \
+    --qubo_csv Qmol_FM/example_data/qubo_128.csv \
+    --input_h5 latent_codes.h5 \
+    --output_h5 optimized_codes.h5 \
+    --single_features_json single_features_detailed.json \
+    --pair_configs_json pair_value_configurations.json \
+    --n_jobs 8
 ```
 
 ### 3. Decode to SMILES
 
-```python
-from Block_bAE.latent_to_smiles import main as decode_latent
-
-# Convert optimized latent vectors back to SMILES
-decode_latent(
-    input_h5="optimized_codes.h5",
-    model_ckpt_path="path/to/model.ckpt",
-    vocab_path="vocab.json",
-    output_h5="output_molecules.h5"
-)
+```bash
+python Block_bAE/latent_to_smiles.py \
+    --input_h5 optimized_codes.h5 \
+    --model_ckpt_path path/to/model.ckpt \
+    --vocab_path Block_bAE/vocab/vocabulary.json \
+    --output_h5 output_molecules.h5
 ```
 
 ## Architecture
 
 ### Block_bAE (Binary Autoencoder)
 
-- **Encoder**: GRU-based sequential encoder with Gumbel-Softmax sampling
-- **Latent Space**: Binary vectors (128/328/628 dimensions)
-- **Decoder**: Transformer-based decoder with attention mechanism
-- **Training**: Reconstruction loss + KL divergence regularization
+- **Encoder**: GRU or Transformer-based encoder with Gumbel-Softmax binarization
+- **Latent Space**: Binary vectors (128-bit default) via straight-through Gumbel-Softmax
+- **Decoder**: Transformer decoder with cross-attention over latent memory
+- **Training**: Reconstruction loss + KL divergence with free-bits, scheduled sampling, word dropout
 
-### Qmol_FM (Optimization Module)
+### Qmol_FM (Surrogate Modeling, Generation & Optimization)
 
-- **Factorization Machine**: Learns property-bit interactions from training data
-- **QUBO Formulation**: Converts FM to quadratic/higher-order unconstrained binary optimization
-- **Optimization Strategies**:
+- **Surrogate Models**: FM, MLP, and FT-Transformer architectures for property prediction from binary latent codes
+- **QUBO Formulation**: Converts trained FM to quadratic/higher-order unconstrained binary optimization
+- **De Novo Generation**: Generate novel molecules by minimizing QUBO energy
+  - Genetic Algorithm (DEAP-based) with configurable population and generations
+  - TPE Bayesian optimization (Optuna-based) for efficient search
+  - Quantum annealing via Kaiwu SDK
+- **Local Optimization**: Improve existing molecules via bit-flip strategies
   - Single-bit flip optimization
   - Pairwise configuration optimization
   - Greedy cumulative optimization
@@ -101,26 +131,35 @@ decode_latent(
 ## Project Structure
 
 ```
-Janus-QUBO_GitHub/
+Janus-QUBO/
 ├── Block_bAE/                          # Molecular autoencoder
-│   ├── model_gru_transformer.py        # Model architecture
-│   ├── inference_latent.py             # SMILES → Latent encoding
+│   ├── model_gru_transformer.py        # Model architecture (GRU/Transformer encoder + Transformer decoder)
+│   ├── train_gruencoder_transformerdecoder.py  # Training script (PyTorch Lightning)
+│   ├── datamodule.py                   # Data loader
+│   ├── encode_smiles.py               # SMILES → Latent encoding (from text file)
+│   ├── inference_latent.py             # SMILES → Latent encoding (from TSV file)
 │   ├── latent_to_smiles.py             # Latent → SMILES decoding
-│   ├── train_gruencoder_transformerdecoder.py  # Training script
-│   └── datamodule.py                   # Data loader
-├── Qmol_FM/                            # Optimization module
-│   ├── opt.py                          # Multi-variant optimizer (main)
-│   ├── convert_fm_to_qubo.py           # FM → QUBO conversion
-│   ├── convert_ising_to_qubo.py        # Ising → QUBO conversion
-│   ├── sample.py                       # Ising solver interface
-│   ├── utils_Qmol_FM.py                # Utility functions
-│   └── hubo.py                         # Higher-order QUBO support
+│   ├── calculate_properties.py         # RDKit property calculation for HDF5 datasets
+│   └── vocab/
+│       └── vocabulary.json             # SELFIES token vocabulary (38 tokens)
+├── Qmol_FM/                            # Surrogate modeling, generation & optimization
+│   ├── train_Qmol_FM.py               # Surrogate model training (FM/MLP/FT-Transformer)
+│   ├── convert_fm_to_qubo.py           # FM → QUBO matrix conversion + verification
+│   ├── sample_ga.py                    # GA-based molecular generation from QUBO
+│   ├── sample_tpe.py                   # TPE Bayesian optimization generation from QUBO
+│   ├── sample.py                       # Kaiwu quantum annealing solver interface
+│   ├── opt.py                          # Local bit-flip optimizer for existing molecules
+│   ├── convert_ising_to_qubo.py        # Ising → QUBO solution conversion
+│   ├── utils_Qmol_FM.py               # Shared utilities (VAE wrapper, SMILES reconstructor)
+│   ├── hubo.py                         # Higher-order QUBO with constraint support
+│   └── example_data/
+│       └── qubo_128.csv               # Pre-trained FM QUBO matrix (128-bit, MSE loss)
 ├── RBM/                                # Sampling module
-│   ├── train_rbm.py                    # RBM model definition
-│   └── sample_from_rbm.py              # Sampling script
-├── .gitignore                          # Git ignore rules
-├── README.md                           # This file
-└── requirements.txt                    # Python dependencies
+│   ├── train_rbm.py                    # RBM training
+│   └── sample_from_rbm.py             # Gibbs sampling for molecular generation
+├── .gitignore
+├── README.md
+└── requirements.txt
 ```
 
 ## Dependencies
@@ -137,29 +176,22 @@ See `requirements.txt` for complete dependency list.
 
 ### Trained Models Required
 
-This repository contains **model architecture code only**. To run inference or training, you will need:
+This repository contains **model architecture and utility code**. To run inference or optimization, you will need:
 
 1. **Pre-trained autoencoder checkpoint** (`.ckpt` file)
-2. **Vocabulary file** (`vocab.json`)
-3. **Training dataset** (for optimization and RBM)
+2. **Training dataset** (for FM training and RBM)
 
-These files are not included due to size constraints and proprietary considerations.
+The vocabulary file is included at `Block_bAE/vocab/vocabulary.json`.
 
-### Quantum Solver Configuration
+### Quantum Solver (Kaiwu SDK)
 
-The `Qmol_FM/sample.py` module interfaces with Kaiwu quantum annealing platform. To use:
+The Kaiwu quantum annealing solver operates on Ising-format matrices. The workflow is:
 
-```bash
-python Qmol_FM/sample.py \
-    --ising_csv input_ising.csv \
-    --output_h5 solutions.h5 \
-    --output_log solver.log \
-    --user_id YOUR_USER_ID \
-    --sdk_code YOUR_SDK_CODE \
-    --num_solutions 500
-```
+1. **QUBO → Ising**: Convert the QUBO matrix using `kw.core.qubo_matrix_to_ising_matrix()`
+2. **Solve**: Run `Qmol_FM/sample.py` with the Ising matrix
+3. **Ising → Binary**: Convert solutions back with `Qmol_FM/convert_ising_to_qubo.py`
 
-**Note**: `user_id` and `sdk_code` are required credentials for accessing the quantum solver service.
+**Note**: `user_id` and `sdk_code` are required credentials for the Kaiwu solver service. The Kaiwu SDK is optional and only needed for this pathway; GA and TPE generation do not require it.
 
 ## Citation
 

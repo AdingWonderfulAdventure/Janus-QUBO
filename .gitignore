@@ -7,6 +7,7 @@
 
 # CSV数据文件
 *.csv
+!Qmol_FM/example_data/qubo_128.csv
 
 # NumPy数组
 *.npy

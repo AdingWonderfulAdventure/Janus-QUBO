@@ -6,8 +6,8 @@ from pathlib import Path
 import sys
 
 # Import utils_Qmol_FM
-utils_Qmol_FM_DIR = "/root/workspace/ProteusQUBO/Qmol_FM"
-sys.path.insert(0, str(Path(utils_Qmol_FM_DIR).resolve()))
+utils_Qmol_FM_DIR = str(Path(__file__).resolve().parent.parent / "Qmol_FM")
+sys.path.insert(0, utils_Qmol_FM_DIR)
 from utils_Qmol_FM import (
     create_vae_wrapper, 
     create_smiles_reconstructor,
