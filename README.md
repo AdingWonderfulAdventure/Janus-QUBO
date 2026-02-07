@@ -198,17 +198,17 @@ The Kaiwu quantum annealing solver operates on Ising-format matrices. The workfl
 If you use this code in your research, please cite:
 
 ```
-[Citation information to be added upon publication]
+DOI: 10.1021/acs.jcim.5c02820
 ```
 
 ## License
 
-[To be determined - add license information]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Contact
 
 For questions regarding this codebase, please contact:
-- [Your contact information]
+- Email: 635015723@qq.com
 
 ---
 
